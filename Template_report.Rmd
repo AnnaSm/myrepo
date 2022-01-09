@@ -1,0 +1,686 @@
+---
+title: "Template report"
+author: "AS, CHU Sainte-Justine"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    theme: paper
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+
+
+knit: (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_file = paste0(
+        'Report_', Sys.Date(), '.html'
+      ),
+      envir = globalenv()
+    )
+  })
+    
+---
+
+```{r setup,  include=FALSE}
+# libraries used
+library(haven)          # reading SAS datasets
+library(readxl)         # reading xlsx datasets
+library(readr)          # reading csv datasets
+
+
+library(ggplot2)        # plotting & data
+library(dplyr)
+library(tidyr)          # packages for data manipulation
+library(faux)
+
+library(dplyr)          # data manipulation
+library(tidyverse)      # system of packages for data manipulation, exploration and visualization
+
+library(lubridate)      # dates manipulation
+library(kableExtra)     # reporting tables
+library(rmdformats)     # HTML formats and templates for 'rmarkdown' documents, automatic table of contents etc.
+
+
+library(gridExtra)      # provides side-by-side plotting
+library(scales)
+library(RColorBrewer)
+library(ggpubr)
+library(grid)
+
+library(tableone)       # generation of Table 1
+library(Table1)         # generation of Table 1
+library(table1)         # generation of Table 1
+library(stats)
+library(rcompanion)
+library(rstatix)        # outliers
+library(outliers)       # outliers
+
+library(anthro)         # by WHO, z-scores for under 5 yo, "i grow"
+library(psych)          # correlation matrix
+library(lme4)           # Mixed models
+
+# https://www.datasurg.net/2018/05/16/elegant-regression-results-tables-and-plots-the-finalfit-package/
+library(finalfit)
+
+library(questionr)
+library(BlandAltmanLeh)
+
+options(digits=3)
+## To create a variable list. Use dput(names(pbc))
+
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning = FALSE, error = FALSE)
+```
+
+# Overview    
+
+## Description of the project    
+
+This document contains the results of the statistical analysis for ...  project. According to the study Protocol, the following analysis should be performed:    
+
+* The relationship between outcome and independent variables such as age, height and weight, ethnicity and BMI will be examined with __regression models__.    
+
+* For each relationship of outcome and the independent variables, the __linear and transformed__ (i.e., quadratic, power, log).   
+
+
+## Predictors     
+
+The following variables have been collected during the visit and entered into the REDCap system:  
+
+* Age   
+* Sex    
+* Ethnicity (Caucasian/Black/Other)    
+* Weight (kg)     
+* Height (cm)   
+* BMI   
+   
+
+_Data sets used:_
+
+* Outcome_dataset1.csv    
+* Outcome_dataset2.csv 
+* REDCap: dataset3.csv   
+
+
+```{r simulated dataset}
+dat <- rnorm_multi(n = 400, 
+                  mu = c(10.4, 142, 37, 0.54),
+                  sd = c(3.5, 21, 12, 0.22),
+                  r = c(0.94, 0.91, -0.84,
+                        0.95, -0.82 ,
+                        -0.77), 
+                  varnames = c("Age", "Height", "Weight", "Outcome"),
+                  empirical = FALSE)
+
+Caucasian <- rbinom(400, size = 1, prob = 0.71)
+Male <- rbinom(400, size = 1, prob = 0.62)
+
+dat <- cbind(dat, Caucasian, Male)
+
+#ggpairs(dat)
+
+dat <- dat %>% mutate(id = row_number(),
+                      Gender = if_else(Male==1, "Male", "Female"),
+                      Ethnicity = if_else(Caucasian==1, "Caucasian", "Other"),
+                      BMI = Weight / (Height*Height/10000))
+```
+
+## Table 1 (Randomized)   
+
+The data set contains data for n = `r nrow(dat)` participants marked as "randomized".  
+The Table 1 contains the demographics characteristics for all randomized participants.   
+
+```{r, warning=FALSE, message=FALSE}
+make.table(dat          = dat,
+           strat        = "Gender",
+           cat.varlist  = c("Gender", "Ethnicity"),
+           cat.rmstat   = list(c("row"), c("col")),
+           cont.varlist = c("Age", "Height", "Weight", "BMI", "Outcome"),
+           caption      = "Table 1",
+           footer       = "all randomized participants",
+           tspanner     = NULL,
+           n.tspanner   = NULL,
+           cgroup       = NULL,
+           n.cgroup     = NULL,
+           output       = "html")
+```
+
+
+
+
+# Nature of Variables (description)      
+
+__Dependent variables__:  All dependent variables are continuous.      
+
+__Independent variables__: can be continuous or categorical       
+     • Age: continuous    
+     • Weight: continuous    
+     • Height: continuous    
+     • BMI: continuous    
+     • Sex: dichotomous categorical     
+     • Ethnicity: categorical    
+  
+        
+
+## Independent variables    
+
+### Multicollinearity
+
+The data set to be verified for the absence of Multicollinearity between the independent variables. Correlation analysis to be performed and well as the VIF (Variance Inflation Factor) to be explored.       
+   
+###  Spearman Correlation:   {.tabset}     
+
+####  All participants:   
+
+
+```{r, fig.height=6, fig.width=6}
+corr_data <- dat %>% select("Age", "Height", "Weight", "BMI", "Outcome")
+
+pairs.panels(corr_data,
+             smooth = TRUE,      # If TRUE, draws loess smooths
+             scale = TRUE,      # If TRUE, scales the correlation text font
+             density = TRUE,     # If TRUE, adds density plots and histograms
+             ellipses = TRUE,    # If TRUE, draws ellipses
+             method = "spearman", # Correlation method (also "pearson"  or "kendall")
+             pch = 21,           # pch symbol
+             lm = FALSE,         # If TRUE, plots linear fit rather than the LOESS (smoothed) fit
+             cor = TRUE,         # If TRUE, reports correlations
+             jiggle = TRUE,     # If TRUE, data points are jittered
+             factor = 2,         # Jittering factor
+             hist.col = "lightblue",       # Histograms color
+             stars = TRUE,       # If TRUE, adds significance level with stars
+             ci = TRUE)          # If TRUE, adds confidence intervals
+```
+
+####  Males:     
+
+```{r, fig.height=6, fig.width=6}
+corr_data_males <- dat %>%
+  filter(Gender=="Male")%>%
+  select("Age", "Height", "Weight", "BMI", "Outcome")
+
+pairs.panels(corr_data_males,
+             smooth = TRUE,      # If TRUE, draws loess smooths
+             scale = TRUE,      # If TRUE, scales the correlation text font
+             density = TRUE,     # If TRUE, adds density plots and histograms
+             ellipses = TRUE,    # If TRUE, draws ellipses
+             method = "spearman", # Correlation method (also "pearson"  or "kendall")
+             pch = 21,           # pch symbol
+             lm = FALSE,         # If TRUE, plots linear fit rather than the LOESS (smoothed) fit
+             cor = TRUE,         # If TRUE, reports correlations
+             jiggle = TRUE,     # If TRUE, data points are jittered
+             factor = 2,         # Jittering factor
+             hist.col = "lightblue",       # Histograms color
+             stars = TRUE,       # If TRUE, adds significance level with stars
+             ci = TRUE)          # If TRUE, adds confidence intervals
+```
+   
+
+####  Females:     
+
+```{r, fig.height=6, fig.width=6}
+corr_data_females <- dat %>%
+  filter(Gender=="Female")%>%
+  select("Age", "Height", "Weight", "BMI", "Outcome")
+
+pairs.panels(corr_data_females,
+             smooth = TRUE,      # If TRUE, draws loess smooths
+             scale = TRUE,      # If TRUE, scales the correlation text font
+             density = TRUE,     # If TRUE, adds density plots and histograms
+             ellipses = TRUE,    # If TRUE, draws ellipses
+             method = "spearman", # Correlation method (also "pearson"  or "kendall")
+             pch = 21,           # pch symbol
+             lm = FALSE,         # If TRUE, plots linear fit rather than the LOESS (smoothed) fit
+             cor = TRUE,         # If TRUE, reports correlations
+             jiggle = TRUE,     # If TRUE, data points are jittered
+             factor = 2,         # Jittering factor
+             hist.col = "lightblue",       # Histograms color
+             stars = TRUE,       # If TRUE, adds significance level with stars
+             ci = TRUE)          # If TRUE, adds confidence intervals
+```
+
+### Distribution of IV (by sex){.tabset}    
+
+Each histogram shows the distribution of the Independent variable by sex, the distribution of the whole dataset is shown in grey color at background. Visual examination aims to help to identify the possible outliers/extreme values and if any transformation can be applied.   
+
+
+#### Age   
+
+```{r histogram Age}
+dat_gender <- dat %>% select(-Gender)  # Background Data )
+
+theme_set(theme_bw())  # pre-set the bw theme.
+
+ggplot(dat, aes(x = Age, fill = Gender)) +
+  geom_histogram(data = dat_gender, binwidth = 1, fill = "grey", alpha = .5) +
+  geom_histogram(colour = "darkgrey", binwidth = 1 ) +
+  scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+  
+  labs(fill="", title="Distribution of age by Gender", 
+       subtitle=paste ("Project, n=" , nrow(dat),", the Age distribution for whole data set is shown in grey"))  +
+  scale_x_continuous(name = "Age (years)")+
+  facet_wrap(~ Gender) +
+  guides(fill = FALSE)   # to remove the legend
+
+```
+
+
+#### Height   
+
+
+```{r histogram Height }
+theme_set(theme_bw())  # pre-set the bw theme.
+
+ggplot(dat, aes(x = Height, fill = Gender)) +
+  geom_histogram(data = dat_gender, binwidth = 5, fill = "grey", alpha = .5) +
+  geom_histogram(colour = "darkgrey", binwidth = 5 ) +
+  scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+  
+  labs(fill="", title="Distribution of Height by Gender", 
+       subtitle=paste ("Project, n=" , nrow(dat),", the Height distribution for whole data set is shown in grey"))  +
+  scale_x_continuous(name = "Standing Height (cm)")+
+  facet_wrap(~ Gender) +
+  guides(fill = FALSE)   # to remove the legend
+
+```
+
+
+#### Weight   
+
+
+```{r histogram Weight }
+theme_set(theme_bw())  # pre-set the bw theme.
+
+ggplot(dat, aes(x = Weight, fill = Gender)) +
+  geom_histogram(data = dat_gender, binwidth = 5, fill = "grey", alpha = .5) +
+  geom_histogram(colour = "darkgrey", binwidth = 5 ) +
+  scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+  
+  labs(fill="", title="Distribution of Weight by Gender", 
+       subtitle=paste ("Project, n=" , nrow(dat),", the Height distribution for whole data set is shown in grey"))  +
+  scale_x_continuous(name = "Weight (kg)")+
+  facet_wrap(~ Gender) +
+  guides(fill = FALSE)   # to remove the legend
+
+```
+
+
+
+
+## Test for Normality       
+
+Shapiro-Wilk normality test was performed for all Independent variables to examine if the variable follows the Normal distribution.    
+
+```{r}
+# Shapiro-Wilk normality test
+test_age <- shapiro.test(dat$Age) 
+test_height_stand <- shapiro.test(dat$Height)
+test_weight <- shapiro.test(dat$Weight) 
+test_outcome <- shapiro.test(dat$Outcome) 
+
+
+
+variables <- c("Age", "Height stand", "Weight", "Outcome")
+statistic <- round(c(test_age$statistic[1],  
+                     test_height_stand$statistic[1], 
+                     test_weight$statistic[1],
+                     test_outcome$statistic[1]), 4)
+p_values <- round(c(test_age$p.value, 
+                    test_height_stand$p.value, 
+                    test_weight$p.value,
+                    test_outcome$p.value), 5)
+```
+
+```{r}
+kable(cbind(variables, statistic, p_values), col.names = c("Variable", "Statistic", "P-value"))%>%
+  kable_styling( "striped", full_width = F, position = "left")
+``` 
+
+### Difference by Gender   {.tabset}    
+
+Consider the association between outcome values by Gender. 
+
+#### by Gender    
+
+```{r, fig.height=6, fig.width=8}
+compare_means(Outcome ~ Gender, data = dat, method = "wilcox.test", paired = FALSE) %>% 
+  kable()%>%
+  kable_styling( "striped", full_width = F, position = "left")
+
+Outcome1_sex <- ggboxplot(dat, x = "Gender", y = "Outcome",
+          color = "Gender", palette =c("#E7B800", "#00AFBB"), add = "jitter") +
+          stat_compare_means()
+Outcome1_sex
+
+#grid.arrange(Outcome1_sex, Outcome2_sex, ncol = 2, nrow = 1)
+```
+
+
+#### by Ethnicty        
+
+```{r, fig.height=6, fig.width=8}
+compare_means(Outcome ~ Ethnicity, data = dat, method = "wilcox.test", paired = FALSE) %>% 
+  kable()%>%
+  kable_styling( "striped", full_width = F, position = "left")
+
+Outcome1_Ethnicity <- ggboxplot(dat, x = "Ethnicity", y = "Outcome",
+          color = "Ethnicity", palette =c("#E7B800", "#00AFBB"), add = "jitter") +
+          stat_compare_means()
+Outcome1_Ethnicity
+
+#grid.arrange(Outcome1_Ethnicity, Outcome2_Ethnicity, ncol = 2, nrow = 1)
+```
+
+### Association of outcomes and IV (by sex) {.tabset}   
+
+Examining the association of outcome variables with independent variables stratified by sex.    
+
+```{r, fig.height=8, fig.width=8}
+  theme_set(theme_bw())
+  
+  grid.arrange(
+    
+  ggplot(dat, aes(Age, Outcome, colour=Gender)) +
+    geom_point() +
+    geom_smooth(alpha=0.2) +
+    theme(legend.position="top") +
+    scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+    scale_y_continuous(name = "Outcome"),
+   
+   ggplot(dat, aes(Height, Outcome, colour=Gender)) +
+    geom_point() +
+    geom_smooth(alpha=0.2) +
+    theme(legend.position="top") +
+    scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+    scale_y_continuous(name = "Outcome"),
+  
+  ggplot(dat, aes(Weight, Outcome, colour=Gender)) +
+    geom_point() +
+    geom_smooth(alpha=0.2) +
+    theme(legend.position="top") +
+    scale_color_manual(values = c("#E7B800", "#00AFBB")) +
+  scale_fill_manual(values = c("#E7B800", "#00AFBB")) +
+    scale_y_continuous(name = "Outcome"),
+  
+  ncol=2, top = textGrob(paste("Association between the outcome and independent variables, by Sex"),gp=gpar(fontsize=12,font=3))) 
+```
+
+### Bivariate and multivariable association
+
+Examining the association (bivariate and multivariable) between IOS variables and IV. The main aim is to examine significant bivariate associations and taking into consideration high correlation between IV, to select the best candidates for the final equation avoiding multicollinearity.      
+
+```{r}
+#define set of IV
+explanatory = c( "Age", "Gender", "Ethnicity", "Height", "Weight", "BMI")
+``` 
+
+
+
+### Outcome1      
+
+Outcome ~ lm(Age + Gender + Caucasian + Height_stand + Weight + bmi) 
+
+```{r}
+#dependent = "Outcome" 
+table_linear <-dat %>% 
+    finalfit("Outcome", explanatory, metrics = TRUE, digits = c(3,3,3) )
+knitr::kable(table_linear[[1]][,c(1,2, 5,6)], "html") %>% kable_styling( "striped", full_width = F, position = "left")
+knitr::kable(table_linear[[2]], "html") %>% kable_styling( "striped", full_width = F, position = "left")
+
+Outcome_table <-table_linear[[1]][,c(1,2, 5,6)]
+```
+
+
+```{r}
+model_Outcome <- lm(Outcome ~ Age + Gender + Ethnicity + Height + Weight + BMI, data = dat)
+ 
+car:: vif(model_Outcome) %>% as.data.frame() %>% 
+  kable(col.names = c("VIF")) %>% 
+  kable_styling( "striped", full_width = F, position = "left")
+```
+
+## Linearity diagnostics             
+
+Let's start with Outcome1 model.   
+
+As visual exam of association of Outcome with Independent variables suggest linear association between Outcome and Age, Height, the following statistics to be reported:     
+
+
+```{r}
+fit1_age = lm(Outcome ~ Age, data=dat)
+fit1_heightstand = lm(Outcome ~ Height, data=dat)
+fit1_weight = lm(Outcome ~ Weight, data=dat)
+fit1_BMI = lm(Outcome ~ BMI, data=dat)
+
+compareLM(fit1_age,
+          fit1_heightstand,
+          fit1_weight,
+          fit1_BMI) %>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+      add_header_above(c("Comparison of models" = 2))
+
+#anova(fit1_age,
+#           fit1_heightstand,
+#         fit1_weight,
+#          fit1_BMI)%>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+#      add_header_above(c("Analysis of Variance" = 6))
+
+```
+
+
+
+Verification of the linear association between the IOS variables and Independent variables.     
+
+
+### Verification of the linear association    {.tabset}      
+
+The residuals error (in red color) between observed values and the fitted regression line. Each vertical red segments represents the residual error between an observed Outcome values and the corresponding predicted (i.e. fitted) value.
+
+```{r}
+model.diag.metrics <- augment(fit1_age)
+residuals1 <-ggplot(model.diag.metrics, aes(Age, Outcome)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Age, yend = .fitted), color = "red", size = 0.3)
+
+model.diag.metrics <- augment(fit1_heightstand)
+residuals2 <-ggplot(model.diag.metrics, aes(Height, Outcome)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Height, yend = .fitted), color = "red", size = 0.3)
+
+model.diag.metrics <- augment(fit1_weight)
+residuals3 <-ggplot(model.diag.metrics, aes(Weight, Outcome)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Weight, yend = .fitted), color = "red", size = 0.3)
+
+model.diag.metrics <- augment(fit1_BMI)
+residuals4 <-ggplot(model.diag.metrics, aes(BMI, Outcome)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = BMI, yend = .fitted), color = "red", size = 0.3)
+```
+
+
+#### Residuals error       
+
+```{r, fig.width = 8, fig.height=6}
+grid.arrange(residuals1, residuals2, residuals3, residuals4, ncol = 2, nrow = 2)
+```
+
+
+  
+
+
+#### Linearity    
+
+The red line is approximately horizontal at zero, indicating a little pattern in the residuals...
+
+```{r, fig.width = 8, fig.height=6}
+par(mfrow = c(2, 2))
+plot(fit1_age, 1); title(sub= "Model 1: Oucome ~ age"); 
+plot(fit1_heightstand, 1); title(sub="Model 2: Oucome ~ Height")
+plot(fit1_weight, 1); title(sub="Model 3: Oucome ~ Weight")
+plot(fit1_BMI, 1); title(sub="Model 4: Oucome ~ BMI")
+```
+
+#### Normality of residuals  
+
+The QQ plot of residuals can be used to visually check the normality assumption. The normal probability plot of residuals should approximately follow a straight line. In our example,  minimum deviation is observed along the reference line at the ...., other plots could suggest that the assumption of normality of residuals is violated.
+
+  
+
+```{r, fig.width = 8, fig.height=6}
+par(mfrow = c(2, 2))
+plot(fit1_age, 2); text(-1,1.5, "Model 1: Oucome ~ age")
+plot(fit1_heightstand, 2); text(-1,1.5, "Model 2: Oucome ~ Height")
+plot(fit1_weight, 2); text(-1,1.5, "Model 3: Oucome ~ Weight")
+plot(fit1_BMI, 2); text(-1,1.5, "Model 4: Oucome ~ BMI")
+```
+
+#### Scale-Location   
+
+Checking the homogeneity of variance of the residuals (homoscedasticity), we have to verify if the points are equally spread around the horizontal line - which is observed in Age (no transformation) and Height_stand (no transformation).    
+
+
+```{r, fig.width = 8, fig.height=6}
+par(mfrow = c(2, 2))
+plot(fit1_age, 3); title(sub= "Model 1: Oucome ~ age"); 
+plot(fit1_heightstand, 3); title(sub="Model 2: Oucome ~ Height")
+plot(fit1_weight, 3); title(sub="Model 3: Oucome ~ Weight")
+plot(fit1_BMI, 3); title(sub="Model 4: Oucome ~ BMI")
+```
+
+## Multivariable regression  
+
+
+Based on the previous results, the following models to be compared for IOS variables of interest.   
+
+* Model 1: Outcome ~ lm(Age + Caucasian + Height)    
+* Model 2: Outcome ~ lm(Age + Caucasian + Weight)    
+* Model 3: Outcome~ lm(Age + Height)    
+* Model 4: Outcome ~ lm(Age + BMI)   
+* Model 5: Outcome ~ lm(Height)  
+* Model 6: Outcome ~ lm(Age)  
+
+```{r function models_table}
+#explanatory1 = c("Age", "Caucasian", "Height")
+#explanatory2 = c("Age", "Caucasian", "Weight")
+explanatory3 = c("Age", "Height")
+explanatory4 = c("Age", "BMI") 
+explanatory5 = c("Height") 
+explanatory6 = c("Age") 
+dependent = "Outcome"
+
+#test_model1 <-dat_model %>%  finalfit(dependent, explanatory1, metrics = TRUE, digits = c(3,3,3) )
+#test_model2 <-dat_model %>%  finalfit(log_dependent, explanatory1, metrics = TRUE, digits = c(3,3,3) )
+
+
+#Model1 <-dat %>%  finalfit(dependent, explanatory1, metrics = TRUE, digits = c(3,3,3) )
+#Model2 <-dat %>%  finalfit(dependent, explanatory2, metrics = TRUE, digits = c(3,3,3) )
+Model3 <-dat %>%  finalfit(dependent, explanatory3, metrics = TRUE, digits = c(3,3,3) )
+Model4 <-dat %>%  finalfit(dependent, explanatory4, metrics = TRUE, digits = c(3,3,3) )
+Model5 <-dat %>%  finalfit(dependent, explanatory5, metrics = TRUE, digits = c(3,3,3) )
+Model6 <-dat %>%  finalfit(dependent, explanatory6, metrics = TRUE, digits = c(3,3,3) )
+
+knitr::kable((rbind(
+      #Model1[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 1"),
+     # Model2[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 2"),
+      Model3[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 3"),
+      Model4[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 4"),
+      Model5[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 5"),
+      Model6[[1]][,c(1,2, 5,6)]%>% mutate(model = "Model 6")) %>%
+    select(-model)), "html") %>% 
+  #collapse_rows(columns = 1, valign = "middle")%>%
+  kable_styling( "striped", full_width = F, position = "left")%>%
+  #pack_rows("Model 1", 1, 4) %>%
+  #pack_rows("Model 2", 5, 8) %>%
+  pack_rows("Model 3", 1, 2) %>%
+  pack_rows("Model 4", 3, 4) %>%
+  pack_rows("Model 5", 5, 5) %>%
+  pack_rows("Model 6", 6, 6) 
+
+``` 
+
+
+
+
+
+```{r function models_comparison }
+models_comparison <- function(IOS_var, IOS_var_transformed, dat_model){
+    Model1_test <- lm(IOS_var ~ age + Caucasian + height_stand , data = dat_model)
+    Model2_test <- lm(IOS_var ~ age + Caucasian + height_sit , data = dat_model)
+    Model3_test <- lm(IOS_var ~ age + height_stand , data = dat_model)
+    Model4_test <- lm(IOS_var ~ age + height_sit , data = dat_model)
+    Model5_test <- lm(IOS_var ~ height_stand , data = dat_model)
+    Model6_test <- lm(IOS_var ~ height_sit , data = dat_model)
+    Model7_test <- lm(IOS_var ~ age , data = dat_model)
+    Model7_test_transformed <- lm(IOS_var_transformed ~ height_stand , data = dat_model)
+    
+    comparison_to_print <- compareLM(Model1_test, 
+          Model2_test, 
+          Model3_test, 
+          Model4_test, 
+          Model5_test, 
+          Model6_test,
+          Model7_test,
+          Model7_test_transformed) %>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+      add_header_above(c("Comparison of models" = 2))
+    
+    anova_result <- anova(Model1_test, 
+          Model2_test, 
+          Model3_test, 
+          Model4_test, 
+          Model5_test,
+          Model6_test,
+          Model7_test,
+          Model7_test_transformed) %>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+      add_header_above(c("Analysis of Variance" = 6))
+    
+    #return(list(comparison_to_print, anova_result))
+    return(comparison_to_print)
+}
+#models_comparison(dat_model$R5_mean, dat_model)
+
+
+models_comparisonX <- function(IOS_var,  dat_model){
+    Model1_test <- lm(IOS_var ~ age + Caucasian + height_stand , data = dat_model)
+    Model2_test <- lm(IOS_var ~ age + Caucasian + height_sit , data = dat_model)
+    Model3_test <- lm(IOS_var ~ age + height_stand , data = dat_model)
+    Model4_test <- lm(IOS_var ~ age + height_sit , data = dat_model)
+    Model5_test <- lm(IOS_var ~ height_stand , data = dat_model)
+   
+    Model6_test <- lm(IOS_var ~ height_sit , data = dat_model)
+    Model7_test <- lm(IOS_var ~ age , data = dat_model)
+    
+    comparison_to_print <- compareLM(Model1_test, 
+          Model2_test, 
+          Model3_test, 
+          Model4_test, 
+          Model5_test, 
+         
+          Model6_test,
+          Model7_test) %>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+      add_header_above(c("Comparison of models" = 2))
+    
+    anova_result <- anova(Model1_test, 
+          Model2_test, 
+          Model3_test, 
+          Model4_test, 
+          Model5_test,
+         
+          Model6_test,
+          Model7_test) %>% kable()%>% kable_styling( "striped", full_width = F, position = "left") %>%
+      add_header_above(c("Analysis of Variance" = 6))
+    
+    #return(list(comparison_to_print, anova_result))
+    return(comparison_to_print)
+}
+```
